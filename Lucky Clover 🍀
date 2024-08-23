@@ -167,7 +167,7 @@ def redeem_coupon_code(update: Update, context: CallbackContext):
 # Main function to run the bot
 def main():
     # Replace 'YOUR_BOT_TOKEN' with your actual bot token
-    updater = Updater("YOUR_BOT_TOKEN", use_context=True)
+    updater = Updater("7451856111:AAGUmCSyvHtURLD-usu25gyNUg1qULUfjQA", use_context=True)
     
     dp = updater.dispatcher
     
