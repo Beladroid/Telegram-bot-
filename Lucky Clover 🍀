@@ -1,0 +1,198 @@
+from telegram import ReplyKeyboardMarkup, KeyboardButton, Update
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
+import logging
+from datetime import datetime, timedelta
+
+# Set up logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+# Dictionary to store user data
+user_balances = {}
+user_referrals = {}
+user_bank_details = {}
+user_daily_login = {}
+user_consecutive_days = {}
+
+# Dictionary to store valid coupon codes and their usage status
+valid_coupon_codes = {
+    "COUPON123": False,  # False means unused, True means used
+    "SAVE500": False,
+    "DISCOUNT50": False,
+    # Add more coupon codes here
+}
+
+# Define states for conversation handler
+ASKING_BANK_DETAILS, ASKING_COUPON_CODE = range(2)
+
+# Function to handle the start command
+def start(update: Update, context: CallbackContext):
+    user_id = update.message.chat_id
+    
+    # Initialize the user's data if not present
+    if user_id not in user_balances:
+        user_balances[user_id] = 0  # Set initial balance to NGN 0
+        user_daily_login[user_id] = None  # No daily login yet
+        user_consecutive_days[user_id] = 0  # Start with 0 consecutive days
+    
+    # Check if the user has completed all tasks and start the main flow
+    show_main_menu(update, context)
+
+# Function to show the main menu
+def show_main_menu(update: Update, context: CallbackContext):
+    # Define the buttons
+    button_list = [
+        [KeyboardButton("DAILY LOGIN REWARD 💸")],
+        [KeyboardButton("WEEKLY REWARD 🎉"), KeyboardButton("TASKS 👤")],
+        [KeyboardButton("REFERRALS 👥"), KeyboardButton("BALANCE 🤑")],
+        [KeyboardButton("BANK DETAILS 🏦"), KeyboardButton("WITHDRAW FUNDS 💸")],
+        [KeyboardButton("REDEEM CODE ⚡")]
+    ]
+    
+    # Create the keyboard markup
+    reply_markup = ReplyKeyboardMarkup(button_list, resize_keyboard=True)
+    
+    # Send the message with the keyboard
+    update.message.reply_text('Choose an option:', reply_markup=reply_markup)
+
+# Function to handle different text messages
+def handle_message(update: Update, context: CallbackContext):
+    text = update.message.text
+    user_id = update.message.chat_id
+    
+    if text == "DAILY LOGIN REWARD 💸":
+        handle_daily_login_reward(update, context)
+    elif text == "WEEKLY REWARD 🎉":
+        handle_weekly_reward(update, context)
+    elif text == "TASKS 👤":
+        update.message.reply_text("Here are your tasks.")
+    elif text == "REFERRALS 👥":
+        referral_count = len(user_referrals.get(user_id, []))
+        update.message.reply_text(f"You have {referral_count} referrals.")
+    elif text == "BALANCE 🤑":
+        balance = user_balances.get(user_id, 0)
+        update.message.reply_text(f"Your current balance is NGN {balance:.2f}.")
+    elif text == "BANK DETAILS 🏦":
+        if user_id in user_bank_details:
+            update.message.reply_text(f"Your saved bank details: {user_bank_details[user_id]}")
+        else:
+            update.message.reply_text("You have not provided your bank details yet. Please provide them when you attempt a withdrawal.")
+    elif text == "WITHDRAW FUNDS 💸":
+        handle_withdraw_funds(update, context)
+    elif text == "REDEEM CODE ⚡":
+        update.message.reply_text("Enter your coupon code.")
+        return ASKING_COUPON_CODE
+    else:
+        update.message.reply_text("Please select a valid option from the menu.")
+
+# Function to handle daily login reward
+def handle_daily_login_reward(update: Update, context: CallbackContext):
+    user_id = update.message.chat_id
+    current_time = datetime.now()
+    
+    # Check if user has logged in within the last 24 hours
+    last_login = user_daily_login.get(user_id)
+    
+    if last_login and current_time - last_login < timedelta(days=1):
+        time_left = timedelta(days=1) - (current_time - last_login)
+        update.message.reply_text(f"You can only claim your daily reward once every 24 hours. Please try again in {time_left}.")
+    else:
+        # Add NGN 1000 to the user's balance for daily login
+        user_balances[user_id] += 1000
+        user_daily_login[user_id] = current_time  # Update last login time
+        
+        # Increment the consecutive days count
+        if last_login and current_time - last_login < timedelta(days=2):
+            user_consecutive_days[user_id] += 1
+        else:
+            user_consecutive_days[user_id] = 1  # Reset streak if missed a day
+        
+        update.message.reply_text("You have claimed NGN 1000 for your daily login reward.")
+        
+        # Display streak information
+        if user_consecutive_days[user_id] == 7:
+            update.message.reply_text("Congratulations! You've logged in for 7 consecutive days. You can now claim your weekly reward.")
+        else:
+            days_left = 7 - user_consecutive_days[user_id]
+            update.message.reply_text(f"You are on a {user_consecutive_days[user_id]}-day streak. Keep it up! {days_left} days left for the weekly reward.")
+
+# Function to handle weekly reward
+def handle_weekly_reward(update: Update, context: CallbackContext):
+    user_id = update.message.chat_id
+    
+    if user_consecutive_days.get(user_id, 0) >= 7:
+        # Add NGN 1500 to the user's balance for the weekly reward
+        user_balances[user_id] += 1500
+        user_consecutive_days[user_id] = 0  # Reset the streak after claiming the reward
+        update.message.reply_text("You've claimed NGN 1500 for your weekly reward!")
+    else:
+        days_left = 7 - user_consecutive_days.get(user_id, 0)
+        update.message.reply_text(f"You need {days_left} more consecutive daily logins to claim the weekly reward.")
+
+# Function to handle withdrawal funds
+def handle_withdraw_funds(update: Update, context: CallbackContext):
+    user_id = update.message.chat_id
+    
+    # Check if user has provided bank details
+    if user_id not in user_bank_details:
+        update.message.reply_text("Please provide your bank details.")
+        return ASKING_BANK_DETAILS
+    else:
+        # Check referral count
+        referral_count = len(user_referrals.get(user_id, []))
+        if referral_count >= 10:
+            update.message.reply_text("You are eligible to withdraw. Please enter your coupon code.")
+            return ASKING_COUPON_CODE
+        else:
+            update.message.reply_text("You need at least 10 referrals to withdraw. Please invite more friends.")
+
+# Function to handle coupon code redemption
+def redeem_coupon_code(update: Update, context: CallbackContext):
+    user_id = update.message.chat_id
+    coupon_code = update.message.text.strip().upper()
+
+    if coupon_code in valid_coupon_codes and not valid_coupon_codes[coupon_code]:
+        # Add the discount or benefit associated with the coupon
+        user_balances[user_id] += 5000  # Adjust this value as needed
+        
+        # Mark the coupon code as used
+        valid_coupon_codes[coupon_code] = True
+        
+        update.message.reply_text(f"Coupon code {coupon_code} redeemed successfully! Your balance has been updated.")
+    else:
+        update.message.reply_text("Invalid or already used coupon code. Please try again.")
+
+    # End the conversation after redeeming
+    return ConversationHandler.END
+
+# Main function to run the bot
+def main():
+    # Replace 'YOUR_BOT_TOKEN' with your actual bot token
+    updater = Updater("YOUR_BOT_TOKEN", use_context=True)
+    
+    dp = updater.dispatcher
+    
+    # Command handler for the /start command
+    dp.add_handler(CommandHandler("start", start))
+    
+    # Message handler for text messages
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    
+    # Conversation handler for coupon code redemption
+    conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(Filters.text & ~Filters.command, handle_message)],
+        states={
+            ASKING_COUPON_CODE: [MessageHandler(Filters.text & ~Filters.command, redeem_coupon_code)],
+        },
+        fallbacks=[],
+    )
+    
+    dp.add_handler(conv_handler)
+    
+    # Start the bot
+    updater.start_polling()
+    
+    # Run the bot until you press Ctrl-C or the process receives SIGINT, SIGTERM, or SIGABRT
+    updater.idle()
+
+if __name__ == '__main__':
+    main()
